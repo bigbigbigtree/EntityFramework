@@ -268,14 +268,169 @@ namespace Microsoft.EntityFrameworkCore.Query
 
             base.VisitQueryModel(queryModel);
 
+            var joinEliminator = new JoinEliminator();
             var compositePredicateVisitor = _compositePredicateExpressionVisitorFactory.Create();
 
             foreach (var selectExpression in QueriesBySource.Values)
             {
+                joinEliminator.EliminateJoins(selectExpression);
                 compositePredicateVisitor.Visit(selectExpression);
             }
         }
 
+        private class JoinEliminator : ExpressionVisitor
+        {
+            private readonly TableColumnEqualityComparer _tableColumnEqualityComparer = new TableColumnEqualityComparer();
+            private readonly List<TableExpressionBase> _tables = new List<TableExpressionBase>();
+            private readonly HashSet<ColumnExpression> _columns;
+
+            public JoinEliminator() 
+                => _columns = new HashSet<ColumnExpression>(_tableColumnEqualityComparer);
+
+            public void EliminateJoins(SelectExpression selectExpression)
+            {
+                for (var i = selectExpression.Tables.Count - 1; i >= 0; i--)
+                {
+                    var tableExpression = selectExpression.Tables[i];
+
+                    if (tableExpression is LeftOuterJoinExpression joinExpressionBase)
+                    {
+                        _tables.Clear();
+                        _columns.Clear();
+
+                        Visit(joinExpressionBase.Predicate);
+
+                        if (_columns.Count == 1
+                            && _tables.Count == 2
+                            && _tables.Distinct(_tableColumnEqualityComparer).Count() == 1)
+                        {
+                            var newTableExpression
+                                = _tables.Single(t => !ReferenceEquals(t, joinExpressionBase.TableExpression));
+
+                            selectExpression.RemoveTable(joinExpressionBase);
+
+                            if (ReferenceEquals(selectExpression.ProjectStarTable, joinExpressionBase)
+                                || ReferenceEquals(selectExpression.ProjectStarTable, joinExpressionBase.TableExpression))
+                            {
+                                selectExpression.ProjectStarTable = newTableExpression;
+                            }
+                        
+                            var sqlTableReferenceReplacingVisitor
+                                = new SqlTableReferenceReplacingVisitor(
+                                    joinExpressionBase.TableExpression,
+                                    newTableExpression);
+
+                            var newProjection
+                                = selectExpression.Projection
+                                    .Select(expression => sqlTableReferenceReplacingVisitor.Visit(expression))
+                                    .ToList();
+
+                            selectExpression.ReplaceProjection(newProjection);
+
+                            foreach (var tableExpressionBase in selectExpression.Tables)
+                            {
+                                switch (tableExpressionBase)
+                                {
+                                    case PredicateJoinExpressionBase predicateJoinExpressionBase:
+                                    {
+                                        predicateJoinExpressionBase.Predicate
+                                            = sqlTableReferenceReplacingVisitor.Visit(predicateJoinExpressionBase.Predicate);
+
+                                        break;
+                                    }
+
+                                    // TODO: Visit sub-query (SelectExpression) here?
+                                }
+                            }
+
+                            selectExpression.Predicate
+                                = sqlTableReferenceReplacingVisitor.Visit(selectExpression.Predicate);
+
+                            var newOrderBy
+                                = selectExpression.OrderBy.Select(
+                                        ordering => new Ordering(
+                                            sqlTableReferenceReplacingVisitor.Visit(ordering.Expression), ordering.OrderingDirection))
+                                    .ToList();
+
+                            selectExpression.ReplaceOrderBy(newOrderBy);
+                        }
+                    }
+                }
+            }
+
+            private class SqlTableReferenceReplacingVisitor : ExpressionVisitor
+            {
+                private readonly TableExpressionBase _oldTableExpression;
+                private readonly TableExpressionBase _newTableExpression;
+
+                public SqlTableReferenceReplacingVisitor(
+                    TableExpressionBase oldTableExpression, TableExpressionBase newTableExpression)
+                {
+                    _oldTableExpression = oldTableExpression;
+                    _newTableExpression = newTableExpression;
+                }
+
+                public override Expression Visit(Expression expression)
+                {
+                    switch (expression)
+                    {
+                        case ColumnExpression columnExpression
+                            when ReferenceEquals(columnExpression.Table, _oldTableExpression):
+                        {
+                            return new ColumnExpression(
+                                columnExpression.Name, columnExpression.Property, _newTableExpression);
+                        }
+                        
+                        // TODO: More cases here?
+                    }
+
+                    return base.Visit(expression);
+                }
+            }
+
+            private class TableColumnEqualityComparer
+                : IEqualityComparer<TableExpressionBase>, IEqualityComparer<ColumnExpression>
+            {
+                public bool Equals(TableExpressionBase x, TableExpressionBase y)
+                    => TablesEqual(x, y);
+
+                public bool Equals(ColumnExpression x, ColumnExpression y)
+                    => x.Name == y.Name
+                       && TablesEqual(x.Table, y.Table);
+
+                private static bool TablesEqual(TableExpressionBase x, TableExpressionBase y)
+                {
+                    if (x is TableExpression tableExpressionX
+                        && y is TableExpression tableExpressionY)
+                    {
+                        return tableExpressionX.Table == tableExpressionY.Table
+                               && tableExpressionX.Schema == tableExpressionY.Schema;
+                    }
+
+                    return false;
+                }
+
+                public int GetHashCode(TableExpressionBase obj) => 0;
+                public int GetHashCode(ColumnExpression obj) => 0;
+            }
+
+            public override Expression Visit(Expression expression)
+            {
+                switch (expression)
+                {
+                    case ColumnExpression columnExpression:
+                        _tables.Add(columnExpression.Table);
+                        _columns.Add(columnExpression);
+                        break;
+                    case ColumnReferenceExpression columnReferenceExpression:
+                        _tables.Add(columnReferenceExpression.Table);
+                        break;
+                }
+
+                return base.Visit(expression);
+            }
+        }
+        
         /// <summary>
         ///     Visit a sub-query model.
         /// </summary>
