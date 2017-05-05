@@ -1057,6 +1057,26 @@ FROM [Gear] AS [g]
 WHERE [g].[Discriminator] IN (N'Officer', N'Gear') AND (CAST(LEN([g].[LeaderNickname]) AS int) = 5)");
         }
 
+        public override void Select_null_propagation_optimization7()
+        {
+            base.Select_null_propagation_optimization7();
+
+            AssertSql(
+                @"SELECT [g].[LeaderNickname] + [g].[LeaderNickname]
+FROM [Gear] AS [g]
+WHERE [g].[Discriminator] IN (N'Officer', N'Gear')");
+        }
+
+        public override void Select_null_propagation_optimization8()
+        {
+            base.Select_null_propagation_optimization8();
+
+            AssertSql(
+                @"SELECT [g].[LeaderNickname] + [g].[LeaderNickname]
+FROM [Gear] AS [g]
+WHERE [g].[Discriminator] IN (N'Officer', N'Gear')");
+        }
+
         public override void Select_null_propagation_negative1()
         {
             base.Select_null_propagation_negative1();
@@ -1085,6 +1105,90 @@ END
 FROM [Gear] AS [g1]
 CROSS JOIN [Gear] AS [g2]
 WHERE [g1].[Discriminator] IN (N'Officer', N'Gear')");
+        }
+
+        public override void Select_null_propagation_negative3()
+        {
+            base.Select_null_propagation_negative3();
+
+            AssertSql(
+                @"SELECT [t].[Nickname], CASE
+    WHEN [t].[Nickname] IS NOT NULL
+    THEN CASE
+        WHEN [t].[LeaderNickname] IS NOT NULL
+        THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT)
+    END ELSE NULL
+END AS [Condition]
+FROM [Gear] AS [g1]
+LEFT JOIN (
+    SELECT [g2].*
+    FROM [Gear] AS [g2]
+    WHERE [g2].[Discriminator] IN (N'Officer', N'Gear')
+) AS [t] ON [g1].[HasSoulPatch] = 1
+WHERE [g1].[Discriminator] IN (N'Officer', N'Gear')
+ORDER BY [t].[Nickname]");
+        }
+
+        public override void Select_null_propagation_negative4()
+        {
+            base.Select_null_propagation_negative4();
+
+            AssertSql(
+                @"");
+        }
+
+        public override void Select_null_propagation_negative5()
+        {
+            base.Select_null_propagation_negative5();
+
+            AssertSql(
+                @"");
+        }
+
+        public override void Select_null_propagation_negative6()
+        {
+            base.Select_null_propagation_negative6();
+
+            AssertSql(
+                @"SELECT CASE
+    WHEN [g].[LeaderNickname] IS NOT NULL
+    THEN CASE
+        WHEN CAST(LEN([g].[LeaderNickname]) AS int) <> CAST(LEN([g].[LeaderNickname]) AS int)
+        THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT)
+    END ELSE NULL
+END
+FROM [Gear] AS [g]
+WHERE [g].[Discriminator] IN (N'Officer', N'Gear')");
+        }
+
+        public override void Select_null_propagation_negative7()
+        {
+            base.Select_null_propagation_negative7();
+
+            AssertSql(
+                @"SELECT CASE
+    WHEN [g].[LeaderNickname] IS NOT NULL
+    THEN CASE
+        WHEN (([g].[LeaderNickname] = [g].[LeaderNickname]) AND ([g].[LeaderNickname] IS NOT NULL AND [g].[LeaderNickname] IS NOT NULL)) OR ([g].[LeaderNickname] IS NULL AND [g].[LeaderNickname] IS NULL)
+        THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT)
+    END ELSE NULL
+END
+FROM [Gear] AS [g]
+WHERE [g].[Discriminator] IN (N'Officer', N'Gear')");
+        }
+
+        public override void Select_null_propagation_works_for_navigations_with_composite_keys()
+        {
+            base.Select_null_propagation_works_for_navigations_with_composite_keys();
+
+            AssertSql(
+                @"SELECT [t0].[Nickname]
+FROM [CogTag] AS [t]
+LEFT JOIN (
+    SELECT [t.Gear].*
+    FROM [Gear] AS [t.Gear]
+    WHERE [t.Gear].[Discriminator] IN (N'Officer', N'Gear')
+) AS [t0] ON ([t].[GearNickName] = [t0].[Nickname]) AND ([t].[GearSquadId] = [t0].[SquadId])");
         }
 
         public override void Select_Where_Navigation_Scalar_Equals_Navigation_Scalar()

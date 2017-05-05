@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query.Expressions;
 using Microsoft.EntityFrameworkCore.Query.Expressions.Internal;
 using Microsoft.EntityFrameworkCore.Query.ExpressionTranslators;
+using Microsoft.EntityFrameworkCore.Query.ExpressionVisitors.Internal;
 using Microsoft.EntityFrameworkCore.Query.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore.Utilities;
@@ -50,6 +51,7 @@ namespace Microsoft.EntityFrameworkCore.Query.ExpressionVisitors
         private readonly Expression _topLevelPredicate;
 
         private readonly bool _inProjection;
+        private readonly NullCheckRemovalTestingExpressionVisitor _nullCheckRemovalTestingVisitor;
 
         /// <summary>
         ///     Creates a new instance of <see cref="SqlTranslatingExpressionVisitor" />.
@@ -77,6 +79,7 @@ namespace Microsoft.EntityFrameworkCore.Query.ExpressionVisitors
             _targetSelectExpression = targetSelectExpression;
             _topLevelPredicate = topLevelPredicate;
             _inProjection = inProjection;
+            _nullCheckRemovalTestingVisitor = new NullCheckRemovalTestingExpressionVisitor(_queryModelVisitor.QueryCompilationContext);
         }
 
         /// <summary>
@@ -222,10 +225,10 @@ namespace Microsoft.EntityFrameworkCore.Query.ExpressionVisitors
         {
             Check.NotNull(expression, nameof(expression));
 
-            var nullCheckRemoved = TryRemoveNullCheck(expression);
-            if (nullCheckRemoved != null)
+            if (expression.IsNullPropagationCandidate(out var testExpression, out var resultExpression)
+                && _nullCheckRemovalTestingVisitor.CanRewriteNullCheck(testExpression, resultExpression))
             {
-                return Visit(nullCheckRemoved);
+                return Visit(resultExpression);
             }
 
             var test = Visit(expression.Test);
@@ -278,164 +281,74 @@ namespace Microsoft.EntityFrameworkCore.Query.ExpressionVisitors
             return null;
         }
 
-        private Expression TryRemoveNullCheck(ConditionalExpression node)
+        private class NullCheckRemovalTestingExpressionVisitor : NullCheckRewriteTestingExpressionVisitorBase
         {
-            var binaryTest = node.Test as BinaryExpression;
-
-            if (binaryTest == null
-                || !(binaryTest.NodeType == ExpressionType.Equal
-                     || binaryTest.NodeType == ExpressionType.NotEqual))
+            public NullCheckRemovalTestingExpressionVisitor(QueryCompilationContext queryCompilationContext)
+                : base(queryCompilationContext)
             {
-                return null;
             }
 
-            var isLeftNullConstant = binaryTest.Left.IsNullConstantExpression();
-            var isRightNullConstant = binaryTest.Right.IsNullConstantExpression();
-
-            if (isLeftNullConstant == isRightNullConstant)
+            protected override void AnalyzeTestExpression(Expression expression)
             {
-                return null;
-            }
-
-            if (binaryTest.NodeType == ExpressionType.Equal)
-            {
-                var ifTrueConstant = node.IfTrue as ConstantExpression;
-                if (ifTrueConstant == null
-                    || ifTrueConstant.Value != null)
-                {
-                    return null;
-                }
-            }
-            else
-            {
-                var ifFalseConstant = node.IfFalse as ConstantExpression;
-                if (ifFalseConstant == null
-                    || ifFalseConstant.Value != null)
-                {
-                    return null;
-                }
-            }
-
-            var testExpression = isLeftNullConstant ? binaryTest.Right : binaryTest.Left;
-            var resultExpression = binaryTest.NodeType == ExpressionType.Equal ? node.IfFalse : node.IfTrue;
-
-            var nullCheckRemovalTestingVisitor = new NullCheckRemovalTestingVisitor(_queryModelVisitor.QueryCompilationContext);
-
-            return nullCheckRemovalTestingVisitor.CanRemoveNullCheck(testExpression, resultExpression)
-                ? resultExpression
-                : null;
-        }
-
-        private class NullCheckRemovalTestingVisitor : ExpressionVisitorBase
-        {
-            private readonly RelationalQueryCompilationContext _queryCompilationContext;
-            private IQuerySource _querySource;
-            private string _propertyName;
-            private bool? _canRemoveNullCheck;
-
-            public NullCheckRemovalTestingVisitor(RelationalQueryCompilationContext queryCompilationContext)
-            {
-                _queryCompilationContext = queryCompilationContext;
-            }
-
-            public bool CanRemoveNullCheck(Expression testExpression, Expression resultExpression)
-            {
-                AnalyzeTestExpression(testExpression);
-                if (_querySource == null)
-                {
-                    return false;
-                }
-
-                Visit(resultExpression);
-
-                return _canRemoveNullCheck ?? false;
+                base.AnalyzeTestExpression(
+                    expression.RemoveConvert() is NullConditionalExpression nullConditionalExpression
+                        ? nullConditionalExpression.AccessOperation
+                        : expression);
             }
 
             public override Expression Visit(Expression node)
-                => _canRemoveNullCheck == false ? node : base.Visit(node);
-
-            private void AnalyzeTestExpression(Expression expression)
-            {
-                if (expression is QuerySourceReferenceExpression querySourceReferenceExpression)
-                {
-                    _querySource = querySourceReferenceExpression.ReferencedQuerySource;
-                    _propertyName = null;
-
-                    return;
-                }
-
-                var memberExpression = expression as MemberExpression;
-
-                if (memberExpression?.Expression is QuerySourceReferenceExpression querySourceInstance)
-                {
-                    _querySource = querySourceInstance.ReferencedQuerySource;
-                    // ReSharper disable once PossibleNullReferenceException
-                    _propertyName = memberExpression.Member.Name;
-
-                    return;
-                }
-
-                if (expression is MethodCallExpression methodCallExpression
-                    && methodCallExpression.Method.IsEFPropertyMethod())
-                {
-                    if (methodCallExpression.Arguments[0] is QuerySourceReferenceExpression querySourceCaller)
-                    {
-                        if (methodCallExpression.Arguments[1] is ConstantExpression propertyNameExpression)
-                        {
-                            _querySource = querySourceCaller.ReferencedQuerySource;
-                            _propertyName = (string)propertyNameExpression.Value;
-                            if ((_queryCompilationContext.FindEntityType(_querySource)
-                                 ?? _queryCompilationContext.Model.FindEntityType(_querySource.ItemType))
-                                ?.FindProperty(_propertyName)?.IsPrimaryKey()
-                                ?? false)
-                            {
-                                _propertyName = null;
-                            }
-                        }
-                    }
-                }
-            }
-
-            protected override Expression VisitQuerySourceReference(QuerySourceReferenceExpression expression)
-            {
-                _canRemoveNullCheck
-                    = expression.ReferencedQuerySource == _querySource
-                      && _propertyName == null;
-
-                return expression;
-            }
-
-            protected override Expression VisitMember(MemberExpression node)
-            {
-                if (node.Member.Name == _propertyName)
-                {
-                    if (node.Expression is QuerySourceReferenceExpression querySource)
-                    {
-                        _canRemoveNullCheck = querySource.ReferencedQuerySource == _querySource;
-
-                        return node;
-                    }
-                }
-
-                return base.VisitMember(node);
-            }
+                => CanRewrite == false
+                   || !(node is MemberExpression
+                        || node is QuerySourceReferenceExpression
+                        || node is MethodCallExpression
+                        || node is BinaryExpression
+                        || node is UnaryExpression
+                        || node is NullConditionalExpression)
+                    ? node
+                    : base.Visit(node);
 
             protected override Expression VisitMethodCall(MethodCallExpression node)
             {
                 if (node.Method.IsEFPropertyMethod())
                 {
-                    if (node.Arguments[1] is ConstantExpression propertyNameExpression && (string)propertyNameExpression.Value == _propertyName)
+                    if (node.Arguments[0] is QuerySourceReferenceExpression querySource
+                        && node.Arguments[1] is ConstantExpression propertyNameExpression 
+                        && (string)propertyNameExpression.Value == PropertyName)
                     {
-                        if (node.Arguments[0] is QuerySourceReferenceExpression querySource)
-                        {
-                            _canRemoveNullCheck = querySource.ReferencedQuerySource == _querySource;
+                        CanRewrite = querySource.ReferencedQuerySource == QuerySource;
 
-                            return node;
-                        }
+                        return node;
                     }
                 }
 
                 return base.VisitMethodCall(node);
+            }
+
+            protected override Expression VisitBinary(BinaryExpression node)
+            {
+                // not safe to make the optimization due to null semantics
+                // e.g. a != null ? a.Name == null : null cant be translated to a.Name == null
+                // because even if value of 'a' is null, the result of the optimization would be 'true', not the expected 'null'
+                if (node.NodeType == ExpressionType.Equal || node.NodeType == ExpressionType.NotEqual)
+                {
+                    CanRewrite = false;
+
+                    return node;
+                }
+
+                return base.VisitBinary(node);
+            }
+
+            protected override Expression VisitExtension(Expression extensionExpression)
+            {
+                if (extensionExpression is NullConditionalExpression nullConditionalExpression)
+                {
+                    return Visit(nullConditionalExpression.AccessOperation);
+                }
+
+                CanRewrite = false;
+
+                return extensionExpression;
             }
         }
 
