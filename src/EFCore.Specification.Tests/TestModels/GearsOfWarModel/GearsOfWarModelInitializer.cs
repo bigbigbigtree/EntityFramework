@@ -34,7 +34,7 @@ namespace Microsoft.EntityFrameworkCore.Specification.Tests.TestModels.GearsOfWa
 
             var hollowStorm = new Mission
             {
-                CodeName = "Lightmass Offensive",
+                CodeName = "Hollow Storm",
                 Timeline = new DateTimeOffset(2, 3, 1, 8, 0, 0, new TimeSpan())
             };
 
