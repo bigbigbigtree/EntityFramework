@@ -985,14 +985,20 @@ namespace Microsoft.EntityFrameworkCore.Specification.Tests
         [ConditionalFact]
         public virtual void Select_ternary_operation_multiple_conditions()
         {
-            using (var context = CreateContext())
-            {
-                var cartridgeWeapons = context.Weapons
-                    .Select(w => new { w.Id, IsCartidge = w.AmmunitionType == AmmunitionType.Shell && w.SynergyWithId == 1 ? "Yes" : "No" })
-                    .ToList();
+            AssertQuery<Weapon>(
+                ws => ws.Select(w => new { w.Id, IsCartidge = w.AmmunitionType == AmmunitionType.Shell && w.SynergyWithId == 1 ? "Yes" : "No" }),
+                elementSorter: e => e.Id);
 
-                Assert.Equal(9, cartridgeWeapons.Count(w => w.IsCartidge == "No"));
-            }
+
+
+            //using (var context = CreateContext())
+            //{
+            //    var cartridgeWeapons = context.Weapons
+            //        .Select(w => new { w.Id, IsCartidge = w.AmmunitionType == AmmunitionType.Shell && w.SynergyWithId == 1 ? "Yes" : "No" })
+            //        .ToList();
+
+            //    Assert.Equal(9, cartridgeWeapons.Count(w => w.IsCartidge == "No"));
+            //}
         }
 
         [ConditionalFact]
@@ -3156,6 +3162,122 @@ namespace Microsoft.EntityFrameworkCore.Specification.Tests
                 Assert.Equal("Marcus", result[1].Nickname2);
             }
         }
+
+
+
+
+
+
+
+
+
+
+
+
+
+        #region AssertQuery
+
+        private void AssertQuery<TItem1>(
+            Func<IQueryable<TItem1>, IQueryable<object>> query,
+            Func<dynamic, object> elementSorter = null,
+            Action<dynamic, dynamic> elementAsserter = null,
+            bool verifyOrdered = false)
+            where TItem1 : class
+            => AssertQuery(query, query, elementSorter, elementAsserter, verifyOrdered);
+
+        private void AssertQuery<TItem1>(
+            Func<IQueryable<TItem1>, IQueryable<object>> efQuery,
+            Func<IQueryable<TItem1>, IQueryable<object>> l2oQuery,
+            Func<dynamic, object> elementSorter = null,
+            Action<dynamic, dynamic> elementAsserter = null,
+            bool verifyOrdered = false)
+            where TItem1 : class
+        {
+            using (var context = CreateContext())
+            {
+                var actual = efQuery(context.Set<TItem1>()).ToArray();
+                var expected = l2oQuery(GearsOfWarData.Set<TItem1>()).ToArray();
+                TestHelpers.AssertResults(
+                    expected,
+                    actual,
+                    elementSorter ?? (e => e),
+                    elementAsserter ?? ((e, a) => Assert.Equal(e, a)),
+                    verifyOrdered);
+            }
+        }
+
+        private void AssertQuery<TItem1, TItem2>(
+            Func<IQueryable<TItem1>, IQueryable<TItem2>, IQueryable<object>> query,
+            Func<dynamic, object> elementSorter = null,
+            Action<dynamic, dynamic> elementAsserter = null,
+            bool verifyOrdered = false)
+            where TItem1 : class
+            where TItem2 : class
+            => AssertQuery(query, query, elementSorter, elementAsserter, verifyOrdered);
+
+        private void AssertQuery<TItem1, TItem2>(
+            Func<IQueryable<TItem1>, IQueryable<TItem2>, IQueryable<object>> efQuery,
+            Func<IQueryable<TItem1>, IQueryable<TItem2>, IQueryable<object>> l2oQuery,
+            Func<dynamic, object> elementSorter = null,
+            Action<dynamic, dynamic> elementAsserter = null,
+            bool verifyOrdered = false)
+            where TItem1 : class
+            where TItem2 : class
+        {
+            using (var context = CreateContext())
+            {
+                var actual = efQuery(context.Set<TItem1>(), context.Set<TItem2>()).ToArray();
+                var expected = l2oQuery(GearsOfWarData.Set<TItem1>(), GearsOfWarData.Set<TItem2>()).ToArray();
+                TestHelpers.AssertResults(
+                    expected,
+                    actual,
+                    elementSorter ?? (e => e),
+                    elementAsserter ?? ((e, a) => Assert.Equal(e, a)),
+                    verifyOrdered);
+            }
+        }
+
+        private void AssertQuery<TItem1, TItem2, TItem3>(
+            Func<IQueryable<TItem1>, IQueryable<TItem2>, IQueryable<TItem3>, IQueryable<object>> query,
+            Func<dynamic, object> elementSorter = null,
+            Action<dynamic, dynamic> elementAsserter = null,
+            bool verifyOrdered = false)
+            where TItem1 : class
+            where TItem2 : class
+            where TItem3 : class
+            => AssertQuery(query, query, elementSorter, elementAsserter, verifyOrdered);
+
+        private void AssertQuery<TItem1, TItem2, TItem3>(
+            Func<IQueryable<TItem1>, IQueryable<TItem2>, IQueryable<TItem3>, IQueryable<object>> efQuery,
+            Func<IQueryable<TItem1>, IQueryable<TItem2>, IQueryable<TItem3>, IQueryable<object>> l2oQuery,
+            Func<dynamic, object> elementSorter = null,
+            Action<dynamic, dynamic> elementAsserter = null,
+            bool verifyOrdered = false)
+            where TItem1 : class
+            where TItem2 : class
+            where TItem3 : class
+        {
+            using (var context = CreateContext())
+            {
+                var actual = efQuery(context.Set<TItem1>(), context.Set<TItem2>(), context.Set<TItem3>()).ToArray();
+                var expected = l2oQuery(GearsOfWarData.Set<TItem1>(), GearsOfWarData.Set<TItem2>(), GearsOfWarData.Set<TItem3>()).ToArray();
+                TestHelpers.AssertResults(
+                    expected,
+                    actual,
+                    elementSorter ?? (e => e),
+                    elementAsserter ?? ((e, a) => Assert.Equal(e, a)),
+                    verifyOrdered);
+            }
+        }
+
+        #endregion
+
+
+
+
+
+
+
 
         protected GearsOfWarContext CreateContext() => Fixture.CreateContext(TestStore);
 

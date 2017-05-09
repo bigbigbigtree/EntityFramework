@@ -3,6 +3,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Microsoft.EntityFrameworkCore.Query;
 
 namespace Microsoft.EntityFrameworkCore.Specification.Tests.TestModels.GearsOfWarModel
 {
@@ -27,6 +29,61 @@ namespace Microsoft.EntityFrameworkCore.Specification.Tests.TestModels.GearsOfWa
             Weapons = CreateWeapons();
             Tags = CreateTags();
             Gears = CreateGears();
+            LocustLeaders = CreateLocustLeaders();
+            Factions = CreateFactions();
+
+            WireUp(Squads, Missions, SquadMissions, Cities, Weapons, Tags, Gears, LocustLeaders, Factions);
+            WireUp2(LocustLeaders, Factions);
+        }
+
+        public static IQueryable<T> Set<T>()
+        {
+            if (typeof(T) == typeof(City))
+            {
+                return (IQueryable<T>)Cities.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(CogTag))
+            {
+                return (IQueryable<T>)Tags.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(Faction))
+            {
+                return (IQueryable<T>)Factions.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(Gear))
+            {
+                return (IQueryable<T>)Gears.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(Mission))
+            {
+                return (IQueryable<T>)Missions.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(Squad))
+            {
+                return (IQueryable<T>)Squads.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(SquadMission))
+            {
+                return (IQueryable<T>)SquadMissions.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(Weapon))
+            {
+                return (IQueryable<T>)Weapons.AsQueryable();
+            }
+
+            if (typeof(T) == typeof(LocustLeader))
+            {
+                return (IQueryable<T>)LocustLeaders.AsQueryable();
+            }
+
+            throw new NotImplementedException();
         }
 
         public static IReadOnlyList<Squad> CreateSquads()
@@ -65,7 +122,7 @@ namespace Microsoft.EntityFrameworkCore.Specification.Tests.TestModels.GearsOfWa
             => new List<Weapon>
             {
                 new Weapon { Id = 1, Name = "Marcus' Lancer", AmmunitionType = AmmunitionType.Cartridge, IsAutomatic = true },
-                new Weapon { Id = 2, Name = "Marcus' Gnasher", AmmunitionType = AmmunitionType.Shell, IsAutomatic = false/*, SynergyWith = marcusLancer*/ },
+                new Weapon { Id = 2, Name = "Marcus' Gnasher", AmmunitionType = AmmunitionType.Shell, IsAutomatic = false, SynergyWithId = 1 },
                 new Weapon { Id = 3, Name = "Dom's Hammerburst", AmmunitionType = AmmunitionType.Cartridge, IsAutomatic = false },
                 new Weapon { Id = 4, Name = "Dom's Gnasher", AmmunitionType = AmmunitionType.Shell, IsAutomatic = false },
                 new Weapon { Id = 5, Name = "Cole's Gnasher", AmmunitionType = AmmunitionType.Shell, IsAutomatic = false },
@@ -174,9 +231,9 @@ namespace Microsoft.EntityFrameworkCore.Specification.Tests.TestModels.GearsOfWa
             IReadOnlyList<City> cities,
             IReadOnlyList<Weapon> weapons,
             IReadOnlyList<CogTag> tags,
-            IReadOnlyList<Gear> gear,
-            IReadOnlyList<LocustLeader> locustLeader,
-            IReadOnlyList<Faction> faction)
+            IReadOnlyList<Gear> gears,
+            IReadOnlyList<LocustLeader> locustLeaders,
+            IReadOnlyList<Faction> factions)
         {
             squadMissions[0].Mission = missions[0];
             squadMissions[0].Squad = squads[0]; 
@@ -185,47 +242,86 @@ namespace Microsoft.EntityFrameworkCore.Specification.Tests.TestModels.GearsOfWa
             squadMissions[2].Mission = missions[2];
             squadMissions[2].Squad = squads[1];
 
+            missions[0].ParticipatingSquads = new List<SquadMission> { squadMissions[0] };
+            missions[1].ParticipatingSquads = new List<SquadMission> { squadMissions[1] };
+            missions[2].ParticipatingSquads = new List<SquadMission> { squadMissions[2] };
+            squads[0].Missions = new List<SquadMission> { squadMissions[0], squadMissions[1] };
+            squads[1].Missions = new List<SquadMission> { squadMissions[2] };
+
             weapons[1].SynergyWith = weapons[0];
+            //weapons[0].SynergyWith = weapons[1]; // TODO: ?
 
             // dom
-            gear[0].AssignedCity = cities[1];
-            gear[0].CityOfBirth = cities[1];
-            gear[0].Squad = squads[0];
-            gear[0].Tag = tags[0];
-            gear[0].Weapons = new List<Weapon> { weapons[2], weapons[3] };
+            gears[0].AssignedCity = cities[1];
+            gears[0].CityOfBirth = cities[1];
+            gears[0].Squad = squads[0];
+            gears[0].Tag = tags[0];
+            gears[0].Weapons = new List<Weapon> { weapons[2], weapons[3] };
 
             // cole
-            gear[1].CityOfBirth = cities[2];
-            gear[1].AssignedCity = cities[0];
-            gear[1].Squad = squads[0];
-            gear[1].Tag = tags[1];
-            gear[1].Weapons = new List<Weapon> { weapons[4], weapons[5] };
+            gears[1].CityOfBirth = cities[2];
+            gears[1].AssignedCity = cities[0];
+            gears[1].Squad = squads[0];
+            gears[1].Tag = tags[1];
+            gears[1].Weapons = new List<Weapon> { weapons[4], weapons[5] };
 
             // paduk
-            gear[2].CityOfBirth = cities[3];
-            gear[2].AssignedCity = cities[3];
-            gear[2].Squad = squads[1];
-            gear[2].Tag = tags[2];
-            gear[2].Weapons = new List<Weapon> { weapons[8], };
+            gears[2].CityOfBirth = cities[3];
+            gears[2].AssignedCity = cities[3];
+            gears[2].Squad = squads[1];
+            gears[2].Tag = tags[2];
+            gears[2].Weapons = new List<Weapon> { weapons[8], };
 
             // baird
-            gear[3].CityOfBirth = cities[3];
-            gear[3].AssignedCity = cities[0];
-            gear[3].Squad = squads[1];
-            gear[3].Tag = tags[3];
-            gear[3].Weapons = new List<Weapon> { weapons[6], weapons[7] };
-            ((Officer)gear[3]).Reports = new List<Gear> { gear[2] };
+            gears[3].CityOfBirth = cities[3];
+            gears[3].AssignedCity = cities[0];
+            gears[3].Squad = squads[1];
+            gears[3].Tag = tags[3];
+            gears[3].Weapons = new List<Weapon> { weapons[6], weapons[7] };
+            ((Officer)gears[3]).Reports = new List<Gear> { gears[2] };
 
             // marcus
-            gear[4].CityOfBirth = cities[0];
-            gear[4].Squad = squads[0];
-            gear[4].Tag = tags[4];
-            gear[4].Weapons = new List<Weapon> { weapons[0], weapons[1] };
-            ((Officer)gear[4]).Reports = new List<Gear> { gear[0], gear[1], gear[3] };
+            gears[4].CityOfBirth = cities[0];
+            gears[4].Squad = squads[0];
+            gears[4].Tag = tags[4];
+            gears[4].Weapons = new List<Weapon> { weapons[0], weapons[1] };
+            ((Officer)gears[4]).Reports = new List<Gear> { gears[0], gears[1], gears[3] };
 
-            ((LocustCommander)LocustLeaders[3]).DefeatedBy = gear[4];
-            ((LocustCommander)LocustLeaders[3]).CommandingFaction = ((LocustHorde)faction[0]);
-            ((LocustCommander)LocustLeaders[5]).CommandingFaction = ((LocustHorde)faction[1]);
+            cities[0].BornGears = new List<Gear> { gears[4] };
+            cities[1].BornGears = new List<Gear> { gears[0] };
+            cities[2].BornGears = new List<Gear> { gears[1] };
+            cities[3].BornGears = new List<Gear> { gears[2], gears[3] };
+            cities[0].StationedGears = new List<Gear> { gears[1], gears[3] };
+            cities[1].StationedGears = new List<Gear> { gears[0] };
+            cities[2].StationedGears = new List<Gear>();
+            cities[3].StationedGears = new List<Gear> { gears[2] };
+
+            weapons[0].Owner = gears[4];
+            weapons[1].Owner = gears[4];
+            weapons[2].Owner = gears[0];
+            weapons[3].Owner = gears[0];
+            weapons[4].Owner = gears[1];
+            weapons[5].Owner = gears[1];
+            weapons[6].Owner = gears[3];
+            weapons[7].Owner = gears[3];
+            weapons[8].Owner = gears[2];
+
+            ((LocustCommander)locustLeaders[3]).DefeatedBy = gears[4];
+            ((LocustCommander)locustLeaders[3]).CommandingFaction = ((LocustHorde)factions[0]);
+            ((LocustCommander)locustLeaders[5]).CommandingFaction = ((LocustHorde)factions[1]);
+
+            ((LocustHorde)factions[0]).Commander = ((LocustCommander)locustLeaders[3]);
+            //((LocustHorde)factions[0]).Leaders = new List<LocustLeader> { locustLeaders[0], locustLeaders[1], locustLeaders[2], locustLeaders[3] };
+            ((LocustHorde)factions[1]).Commander = ((LocustCommander)locustLeaders[5]);
+            //((LocustHorde)factions[1]).Leaders = new List<LocustLeader> { locustLeaders[4], locustLeaders[5] };
+        }
+
+        public static void WireUp2(
+            IReadOnlyList<LocustLeader> locustLeaders,
+            IReadOnlyList<Faction> factions)
+        {
+            ((LocustHorde)factions[0]).Leaders = new List<LocustLeader> { locustLeaders[0], locustLeaders[1], locustLeaders[2], locustLeaders[3] };
+            ((LocustHorde)factions[1]).Leaders = new List<LocustLeader> { locustLeaders[4], locustLeaders[5] };
         }
     }
 }
